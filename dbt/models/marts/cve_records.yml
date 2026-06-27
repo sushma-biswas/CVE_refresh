@@ -1,0 +1,42 @@
+version: 2
+
+models:
+  - name: cve_records
+    description: >
+      Final clean CVE table. One row per CVE ID, updated incrementally via MERGE.
+      Updated records replace older ones; new records are inserted. This is the
+      primary query target for downstream consumers.
+    columns:
+      - name: cve_id
+        description: CVE identifier — primary key (e.g. CVE-2024-12345)
+        tests:
+          - not_null
+          - unique
+      - name: state
+        description: Current publication state of the CVE
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PUBLISHED', 'REJECTED', 'RESERVED', 'MODIFIED']
+      - name: date_published
+        description: Date the CVE was first published
+      - name: date_updated
+        description: Timestamp of the most recent update to this CVE record
+        tests:
+          - not_null
+      - name: date_reserved
+        description: Date the CVE ID was reserved by a CVE Numbering Authority (CNA)
+      - name: assigner_org_id
+        description: UUID of the CVE Numbering Authority (CNA) that assigned this CVE
+      - name: raw_json
+        description: Full CVE JSON 5 record as a Snowflake VARIANT
+        tests:
+          - not_null
+      - name: loaded_at
+        description: Timestamp when this version of the record was loaded into CVE_RAW
+        tests:
+          - not_null
+      - name: delta_tag
+        description: GitHub release tag from which this record was last loaded
+        tests:
+          - not_null

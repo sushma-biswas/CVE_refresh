@@ -1,0 +1,25 @@
+# ── Credentials ──────────────────────────────────────────────────────────
+.env
+dbt/profiles.yml
+
+# ── Pipeline state and runtime ────────────────────────────────────────────
+# State file lives in the project root (not HOME) when run by a service user
+.pipeline_state
+*.zip
+/tmp/cve_extract_*/
+
+# ── Logs ─────────────────────────────────────────────────────────────────
+logs/*.log
+
+# ── dbt build artefacts ──────────────────────────────────────────────────
+dbt/target/
+dbt/dbt_packages/
+dbt/.user.yml
+
+# ── OS and editor files ───────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/

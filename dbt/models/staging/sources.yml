@@ -1,0 +1,26 @@
+version: 2
+
+sources:
+  - name: cve_schema
+    description: Raw CVE data landing zone in Snowflake
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'CVE_DB') }}"
+    schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'CVE_SCHEMA') }}"
+    freshness:
+      warn_after: {count: 2, period: hour}
+      error_after: {count: 4, period: hour}
+    loaded_at_field: LOADED_AT
+    tables:
+      - name: CVE_RAW
+        description: >
+          Append-only landing table. Each row is one CVE JSON 5 record loaded
+          by stage_to_snowflake.sh via COPY INTO. Multiple rows for the same
+          cve_id can exist when deltas overlap; stg_cve_raw deduplicates.
+        columns:
+          - name: RAW_JSON
+            description: Full CVE JSON 5 record stored as a Snowflake VARIANT
+          - name: LOADED_AT
+            description: Server timestamp when this row was inserted by COPY INTO
+          - name: DELTA_TAG
+            description: GitHub release tag this row came from
+          - name: SOURCE_FILE
+            description: METADATA$FILENAME from the staged file

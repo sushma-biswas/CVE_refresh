@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\scripts\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\sql\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\dbt\\\\models\\\\staging\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\dbt\\\\models\\\\marts\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\dbt\\\\tests\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\tests\\\\fixtures\\\\sample_delta\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\config\" \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\\\\logs\" && echo \"Directories created\")",
+      "Bash(find \"D:\\\\Side projects\\\\Data_engineering\\\\CVE_refresh\" -not -path \"*/\\\\.*\")"
+    ]
+  }
+}

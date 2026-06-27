@@ -1,0 +1,31 @@
+# profiles.yml.example — Copy to profiles.yml and fill in your credentials.
+# profiles.yml is gitignored and must never be committed.
+#
+# dbt reads credentials from environment variables so the actual values
+# never appear in this file. Set them in your .env file or shell environment.
+
+cve_refresh:
+  target: dev
+  outputs:
+    dev:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'DBT_ROLE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'CVE_DB') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'CVE_WH') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'CVE_SCHEMA') }}"
+      threads: 4
+      client_session_keep_alive: false
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'DBT_ROLE') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'CVE_DB') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'CVE_WH') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'CVE_SCHEMA') }}"
+      threads: 4
+      client_session_keep_alive: false

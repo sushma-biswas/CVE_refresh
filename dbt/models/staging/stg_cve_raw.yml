@@ -1,0 +1,40 @@
+version: 2
+
+models:
+  - name: stg_cve_raw
+    description: >
+      Parses CVE JSON 5 records from the raw landing table. Deduplicates across
+      all rows in CVE_RAW so that if the same CVE appears more than once (from
+      overlapping deltas or re-runs), only the record with the most recent
+      dateUpdated is kept.
+    columns:
+      - name: cve_id
+        description: CVE identifier (e.g. CVE-2024-12345)
+        tests:
+          - not_null
+      - name: state
+        description: Publication state of the CVE record
+        tests:
+          - not_null
+          - accepted_values:
+              values: ['PUBLISHED', 'REJECTED', 'RESERVED', 'MODIFIED']
+      - name: date_published
+        description: Date the CVE was first published
+      - name: date_updated
+        description: Date the CVE record was last updated
+      - name: date_reserved
+        description: Date the CVE ID was reserved
+      - name: assigner_org_id
+        description: UUID of the CVE Numbering Authority (CNA) that assigned this CVE
+      - name: raw_json
+        description: Full CVE JSON 5 record as a VARIANT
+        tests:
+          - not_null
+      - name: loaded_at
+        description: Timestamp when this record was loaded into CVE_RAW
+        tests:
+          - not_null
+      - name: delta_tag
+        description: GitHub release tag this record came from (e.g. cve_2026-06-27_0700Z or baseline_YYYY-MM-DD)
+        tests:
+          - not_null

@@ -1,0 +1,14 @@
+{
+  "tag_name": "cve_2026-06-27_0700Z",
+  "published_at": "2026-06-27T07:23:02Z",
+  "assets": [
+    {
+      "name": "2026-06-27_delta_CVEs_at_0700Z.zip",
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-06-27_0700Z/2026-06-27_delta_CVEs_at_0700Z.zip"
+    },
+    {
+      "name": "2026-06-27_all_CVEs_at_midnight.zip",
+      "browser_download_url": "https://github.com/CVEProject/cvelistV5/releases/download/cve_2026-06-27_0700Z/2026-06-27_all_CVEs_at_midnight.zip"
+    }
+  ]
+}
