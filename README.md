@@ -2,6 +2,10 @@
 
 An automated pipeline that loads CVE (Common Vulnerabilities and Exposures) data from the [CVEProject GitHub releases](https://github.com/CVEProject/cvelistV5) into Snowflake and transforms it with dbt.
 
+## Why this project exists
+
+CVE data is the backbone of cyber risk modelling - it's what drives vulnerability scoring, security ratings, and figuring out how much exposure an insurer actually has. I built this pipeline to reflect the kind of data infrastructure I worked on at Chubb: pulling in data incrementally from an external provider, landing it raw, transforming it into something clean and usable with dbt, and keeping the whole thing running on a schedule with proper observability. I picked this domain on purpose — it ties directly to the work I do as a Cyber insurance data SME.
+
 ## How it works
 
 1. **Baseline (first run only)** — downloads the complete CVE dataset (`all_CVEs_at_midnight.zip`), which contains every CVE record ever published.
