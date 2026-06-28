@@ -1,0 +1,24 @@
+# Credentials — never bake into the image
+.env
+dbt/profiles.yml
+
+# Pipeline runtime state
+.pipeline_state
+logs/
+
+# dbt build artifacts
+dbt/target/
+dbt/dbt_packages/
+dbt/.user.yml
+
+# Git and editor
+.git/
+.gitignore
+.gitattributes
+.claude/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

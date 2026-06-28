@@ -32,7 +32,7 @@ fi
 
 chmod +x "$PIPELINE_SCRIPT"
 
-CRON_ENTRY="30 * * * * ${PIPELINE_SCRIPT} >> ${LOG_FILE} 2>&1"
+CRON_ENTRY="30 * * * * bash ${PIPELINE_SCRIPT} >> ${LOG_FILE} 2>&1"
 
 echo "Current cron table (before change):"
 crontab -l 2>/dev/null | grep "cve_pipeline" || echo "  (no existing cve_pipeline entry)"

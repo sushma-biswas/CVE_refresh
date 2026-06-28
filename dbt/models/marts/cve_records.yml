@@ -21,9 +21,7 @@ models:
       - name: date_published
         description: Date the CVE was first published
       - name: date_updated
-        description: Timestamp of the most recent update to this CVE record
-        tests:
-          - not_null
+        description: Timestamp of the most recent update to this CVE record (null for RESERVED CVEs)
       - name: date_reserved
         description: Date the CVE ID was reserved by a CVE Numbering Authority (CNA)
       - name: assigner_org_id

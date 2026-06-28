@@ -87,6 +87,31 @@ assert_called_with() {
   fi
 }
 
+# setup_test_scripts_dir — copy cve_pipeline.sh to a temp scripts dir so that
+# SCRIPT_DIR inside the running pipeline points there, allowing mock_script to
+# place sibling script mocks that cve_pipeline.sh will find via its absolute
+# "${SCRIPT_DIR}/download_cve.sh" / "${SCRIPT_DIR}/stage_to_snowflake.sh" calls.
+# Sets and exports TEST_SCRIPTS_DIR; returns the path.
+setup_test_scripts_dir() {
+  TEST_SCRIPTS_DIR="${TEST_TMPDIR}/scripts"
+  mkdir -p "$TEST_SCRIPTS_DIR"
+  cp "${SCRIPTS_DIR}/cve_pipeline.sh" "$TEST_SCRIPTS_DIR/"
+  export TEST_SCRIPTS_DIR
+  echo "$TEST_SCRIPTS_DIR"
+}
+
+# mock_script <name> [exit_code] [stdout_output]
+# Creates a mock executable in TEST_SCRIPTS_DIR (not MOCK_BIN) so that it is
+# found when cve_pipeline.sh calls bash "${SCRIPT_DIR}/<name>".
+mock_script() {
+  local name="$1"
+  local exit_code="${2:-0}"
+  local output="${3:-}"
+  printf '#!/usr/bin/env bash\nprintf "%%s\n" "%s"\nexit %s\n' \
+    "$output" "$exit_code" > "${TEST_SCRIPTS_DIR}/${name}"
+  chmod +x "${TEST_SCRIPTS_DIR}/${name}"
+}
+
 # setup_test_env — export fake Snowflake credentials for tests.
 # Call this in per-file setup() after shared_setup.
 setup_test_env() {

@@ -76,6 +76,10 @@ dbt source freshness \
 log "INFO " "Pipeline start"
 START_TIME=$(date +%s)
 
+# Export TMPDIR so stage_to_snowflake.sh's path-safety guard uses the same
+# temp root as download_cve.sh (which receives it via --tmp-dir).
+export TMPDIR="${CVE_TMP_DIR:-/tmp}"
+
 download_output=$(bash "${SCRIPT_DIR}/download_cve.sh" \
   --state-file "$STATE_FILE" \
   --tmp-dir "${CVE_TMP_DIR:-/tmp}") || {
@@ -115,10 +119,12 @@ log "INFO " "Snowflake load complete"
 # ── Step 3: Run dbt ──────────────────────────────────────────────────────
 log "INFO " "Running dbt models (target: ${DBT_TARGET})"
 
+DBT_MODELS=(stg_cve_raw cve_records)
+
 dbt run \
   --project-dir "$DBT_DIR" \
   --profiles-dir "$DBT_DIR" \
-  --select stg_cve_raw cve_records \
+  --select "${DBT_MODELS[@]}" \
   --target "$DBT_TARGET" \
   --no-version-check 2>&1 | tee -a "$LOG_FILE"
 
@@ -134,7 +140,7 @@ log "INFO " "Running dbt tests"
 dbt test \
   --project-dir "$DBT_DIR" \
   --profiles-dir "$DBT_DIR" \
-  --select stg_cve_raw cve_records \
+  --select "${DBT_MODELS[@]}" \
   --target "$DBT_TARGET" \
   --no-version-check 2>&1 | tee -a "$LOG_FILE"
 dbt_test_exit="${PIPESTATUS[0]}"

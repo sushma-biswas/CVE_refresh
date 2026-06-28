@@ -1,0 +1,13 @@
+services:
+  cve-pipeline:
+    build: .
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs      # bind mount — tail logs from host without docker exec
+      - cve_state:/state      # named volume — state file survives docker compose down/up
+      - cve_tmp:/tmp          # named volume — 15GB+ temp space for baseline ZIP extraction
+    restart: unless-stopped
+
+volumes:
+  cve_state:
+  cve_tmp:

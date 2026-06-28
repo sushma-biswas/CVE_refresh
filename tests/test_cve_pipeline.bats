@@ -4,12 +4,16 @@
 
 load setup
 
-SCRIPT="${SCRIPTS_DIR}/cve_pipeline.sh"
 SAMPLE_TAG="cve_2026-06-27_0700Z"
 
 setup() {
   shared_setup
   setup_test_env
+  setup_test_scripts_dir
+
+  # SCRIPT points to the copy in TEST_SCRIPTS_DIR so SCRIPT_DIR inside the
+  # pipeline resolves to TEST_SCRIPTS_DIR, where mock_script places mocks.
+  SCRIPT="${TEST_SCRIPTS_DIR}/cve_pipeline.sh"
 
   EXTRACT_DIR="${CVE_TMP_DIR}/extract_${SAMPLE_TAG}"
   mkdir -p "$EXTRACT_DIR"
@@ -17,25 +21,25 @@ setup() {
 }
 
 mock_download_success() {
-  cat > "${MOCK_BIN}/download_cve.sh" <<EOF
+  cat > "${TEST_SCRIPTS_DIR}/download_cve.sh" <<EOF
 #!/usr/bin/env bash
 echo "${SAMPLE_TAG} ${EXTRACT_DIR}"
 exit 0
 EOF
-  chmod +x "${MOCK_BIN}/download_cve.sh"
+  chmod +x "${TEST_SCRIPTS_DIR}/download_cve.sh"
 }
 
 mock_download_skip() {
-  cat > "${MOCK_BIN}/download_cve.sh" <<'EOF'
+  cat > "${TEST_SCRIPTS_DIR}/download_cve.sh" <<'EOF'
 #!/usr/bin/env bash
 echo "SKIP"
 exit 0
 EOF
-  chmod +x "${MOCK_BIN}/download_cve.sh"
+  chmod +x "${TEST_SCRIPTS_DIR}/download_cve.sh"
 }
 
 mock_stage_success() {
-  mock_command_recording "stage_to_snowflake.sh" 0 "Loaded 347 rows"
+  mock_script "stage_to_snowflake.sh" 0 "Loaded 347 rows"
 }
 
 mock_dbt_success() {
@@ -45,18 +49,19 @@ mock_dbt_success() {
 @test "full pipeline calls download then stage then dbt in order" {
   local order_log="${TEST_TMPDIR}/order.log"
 
-  cat > "${MOCK_BIN}/download_cve.sh" <<EOF
+  # Sub-scripts go in TEST_SCRIPTS_DIR (absolute path calls); dbt goes in MOCK_BIN (PATH lookup).
+  cat > "${TEST_SCRIPTS_DIR}/download_cve.sh" <<EOF
 #!/usr/bin/env bash
 echo "download" >> "${order_log}"
 echo "${SAMPLE_TAG} ${EXTRACT_DIR}"
 EOF
-  chmod +x "${MOCK_BIN}/download_cve.sh"
+  chmod +x "${TEST_SCRIPTS_DIR}/download_cve.sh"
 
-  cat > "${MOCK_BIN}/stage_to_snowflake.sh" <<EOF
+  cat > "${TEST_SCRIPTS_DIR}/stage_to_snowflake.sh" <<EOF
 #!/usr/bin/env bash
 echo "stage" >> "${order_log}"
 EOF
-  chmod +x "${MOCK_BIN}/stage_to_snowflake.sh"
+  chmod +x "${TEST_SCRIPTS_DIR}/stage_to_snowflake.sh"
 
   cat > "${MOCK_BIN}/dbt" <<EOF
 #!/usr/bin/env bash
@@ -86,7 +91,7 @@ EOF
 
 @test "does not update state file when stage step fails" {
   mock_download_success
-  mock_command "stage_to_snowflake.sh" 1 "Error: PUT failed"
+  mock_script "stage_to_snowflake.sh" 1 "Error: PUT failed"
   mock_dbt_success
 
   run bash "$SCRIPT" --state-file "$STATE_FILE" --log-file "$LOG_FILE"
@@ -127,7 +132,7 @@ EOF
 }
 
 @test "logs error and exits non-zero on any step failure" {
-  mock_command "download_cve.sh" 1 "Error: network timeout"
+  mock_script "download_cve.sh" 1 "Error: network timeout"
 
   run bash "$SCRIPT" --state-file "$STATE_FILE" --log-file "$LOG_FILE"
 

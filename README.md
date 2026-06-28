@@ -127,9 +127,81 @@ cd dbt && dbt deps && cd ..
 # SELECT COUNT(*), MAX(DATE_UPDATED) FROM CVE_DB.CVE_SCHEMA.CVE_RECORDS;
 ```
 
-## Scheduling
+## Running with Docker
 
-Register the hourly cron job:
+Docker bundles all dependencies (bash, curl, jq, unzip, SnowSQL, dbt) into a single image. No host setup beyond Docker itself.
+
+### Build the image
+
+```bash
+docker compose build
+```
+
+Verify tools installed correctly:
+
+```bash
+docker compose run --rm cve-pipeline snowsql --version
+docker compose run --rm cve-pipeline dbt --version
+docker compose run --rm cve-pipeline bats --version
+```
+
+### First run (baseline)
+
+The baseline download takes 30-60 minutes and requires 15+ GB of temp space. Run it manually so you can monitor progress:
+
+```bash
+docker compose run --rm cve-pipeline \
+  /app/scripts/cve_pipeline.sh \
+  --state-file /state/.pipeline_state \
+  --log-file /app/logs/pipeline.log
+```
+
+> **Disk space:** the `/tmp` named volume (`cve_tmp`) must have 15+ GB available. If Docker's default storage is on a small partition, replace the named volume with a bind mount to a larger path — in `docker-compose.yml`, change `cve_tmp:/tmp` to `/data/tmp:/tmp` (or any path with sufficient space).
+
+### Start the scheduled pipeline
+
+```bash
+docker compose up -d
+```
+
+The container runs cron internally. The pipeline fires at :30 past every hour. View logs:
+
+```bash
+# From the host (bind-mounted)
+tail -f logs/pipeline.log
+
+# Or via Docker
+docker compose logs -f cve-pipeline
+```
+
+### Trigger a manual run inside the running container
+
+```bash
+docker compose exec cve-pipeline \
+  /app/scripts/cve_pipeline.sh \
+  --state-file /state/.pipeline_state \
+  --log-file /app/logs/pipeline.log
+```
+
+### Run bash tests inside the container
+
+```bash
+docker compose run --rm cve-pipeline bats /app/tests/
+```
+
+### Stop and reset
+
+```bash
+# Stop (state and logs are preserved in volumes/bind mount)
+docker compose down
+
+# Full reset — destroys state and tmp volumes; next run re-downloads the baseline
+docker compose down -v
+```
+
+## Scheduling (non-Docker)
+
+Register the hourly cron job on the host:
 
 ```bash
 ./scripts/setup_cron.sh
