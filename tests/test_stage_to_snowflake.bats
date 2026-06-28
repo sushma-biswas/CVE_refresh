@@ -139,8 +139,6 @@ EOF
 
   [[ "$status" -eq 0 ]]
   call_log="${TEST_TMPDIR}/snowsql.calls"
-  if [[ -f "$call_log" ]]; then
-    run grep -c " -r " "$call_log"
-    [[ "$output" == "0" ]]
-  fi
+  # Do not use nested `run grep` — it overwrites $status from the outer run.
+  [[ ! -f "$call_log" ]] || ! grep -q " -r " "$call_log"
 }

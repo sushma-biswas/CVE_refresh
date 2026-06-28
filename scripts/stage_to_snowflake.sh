@@ -86,7 +86,12 @@ run_snowsql() {
   SNOWSQL_PWD="$SNOWFLAKE_PASSWORD" snowsql "${SNOWSQL_ARGS[@]}" "$@"
 }
 
-STAGE_PATH="@CVE_STAGE/${TAG}"
+# Snowflake object names — override via env vars if you renamed them from defaults.
+SNOWFLAKE_STAGE="${SNOWFLAKE_STAGE:-CVE_STAGE}"
+SNOWFLAKE_TABLE="${SNOWFLAKE_TABLE:-CVE_RAW}"
+SNOWFLAKE_FORMAT="${SNOWFLAKE_FORMAT:-CVE_JSON_FORMAT}"
+
+STAGE_PATH="@${SNOWFLAKE_STAGE}/${TAG}"
 
 # ── PUT files to Snowflake internal stage ─────────────────────────────────
 log "PUT ${EXTRACT_DIR}/*.json → ${STAGE_PATH}/"
@@ -99,10 +104,10 @@ run_snowsql -q \
 put_elapsed=$(( $(date +%s) - put_start ))
 log "PUT complete in ${put_elapsed}s"
 
-# ── COPY INTO CVE_RAW ─────────────────────────────────────────────────────
-log "COPY INTO CVE_RAW from ${STAGE_PATH}/"
+# ── COPY INTO landing table ───────────────────────────────────────────────
+log "COPY INTO ${SNOWFLAKE_TABLE} from ${STAGE_PATH}/"
 copy_output=$(run_snowsql -q "
-  COPY INTO CVE_RAW (RAW_JSON, DELTA_TAG, SOURCE_FILE)
+  COPY INTO ${SNOWFLAKE_TABLE} (RAW_JSON, DELTA_TAG, SOURCE_FILE)
   FROM (
     SELECT
       \$1,
@@ -110,10 +115,10 @@ copy_output=$(run_snowsql -q "
       METADATA\$FILENAME
     FROM ${STAGE_PATH}/
   )
-  FILE_FORMAT = (FORMAT_NAME = CVE_JSON_FORMAT)
+  FILE_FORMAT = (FORMAT_NAME = ${SNOWFLAKE_FORMAT})
   ON_ERROR = 'CONTINUE';
 ") || {
-  log "ERROR: COPY INTO CVE_RAW failed"
+  log "ERROR: COPY INTO ${SNOWFLAKE_TABLE} failed"
   exit 1
 }
 
@@ -125,7 +130,7 @@ fi
 
 # ── Verify rows actually landed (tag-based count — reliable across all SnowSQL versions)
 rows_loaded=$(run_snowsql -q \
-  "SELECT COUNT(*) FROM CVE_RAW WHERE DELTA_TAG = '${TAG}';" \
+  "SELECT COUNT(*) FROM ${SNOWFLAKE_TABLE} WHERE DELTA_TAG = '${TAG}';" \
   | grep -Eo '[0-9]+' | head -1 || echo "0")
 
 if [[ -z "$rows_loaded" || "$rows_loaded" -eq 0 ]]; then

@@ -1,0 +1,11 @@
+# Force LF line endings for files that run inside the Linux container.
+# Without this, Windows git may store CRLF endings, causing
+# "bash\r: no such file" errors at container startup.
+* text=auto
+*.sh text eol=lf
+*.bats text eol=lf
+*.bash text eol=lf
+*.sql text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Dockerfile text eol=lf

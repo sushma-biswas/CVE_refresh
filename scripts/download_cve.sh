@@ -52,7 +52,7 @@ cleanup() {
   [[ -n "$ZIP_PATH"    ]] && rm -f "$ZIP_PATH"
   [[ -n "$EXTRACT_DIR" ]] && rm -rf "$EXTRACT_DIR"
 }
-trap cleanup ERR
+trap cleanup ERR EXIT
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ if [[ -z "$LAST_TAG" ]]; then
   fi
   validate_github_url "$baseline_url"
 
-  DATE_PART="${tag_name#cve_}"; DATE_PART="${DATE_PART%%_*}"
+  DATE_PART="${tag_name#cve_}"; DATE_PART="${DATE_PART#baseline_}"; DATE_PART="${DATE_PART%%_*}"
   TAG="baseline_${DATE_PART}"
   ZIP_PATH="${TMP_DIR}/cve_${TAG}.zip"
   EXTRACT_DIR="${TMP_DIR}/cve_extract_${TAG}"
@@ -208,8 +208,11 @@ ZIP_PATH=""  # prevent trap from double-deleting
 json_count=$(find "$EXTRACT_DIR" -name '*.json' | wc -l | tr -d ' ')
 log "Extracted ${json_count} JSON files"
 
-# Disable the error trap now that we're emitting a clean result line
-trap - ERR
+# Disable the trap and pass EXTRACT_DIR ownership to the caller.
+# Clear the variable so the EXIT trap does not clean it up on normal exit.
+trap - ERR EXIT
+RESULT_EXTRACT_DIR="$EXTRACT_DIR"
+EXTRACT_DIR=""
 
 # ── Emit result for caller ─────────────────────────────────────────────────
-echo "${TAG} ${EXTRACT_DIR}"
+echo "${TAG} ${RESULT_EXTRACT_DIR}"
