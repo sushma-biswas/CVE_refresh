@@ -62,3 +62,21 @@ NVD_SOURCE_ID = "nvd@nist.gov"
 # site and own that choice.
 TERMINAL_UNENRICHED_STATUSES = frozenset({"Not Scheduled", "Deferred"})
 QUEUED_STATUSES = frozenset({"Awaiting Analysis", "Received", "Undergoing Analysis"})
+
+# Records younger than this are excluded from any headline figure.
+#
+# Records appear to be marked Deferred at intake and some are reclassified as
+# triage proceeds, so a window holding very fresh records overstates deferral.
+# Measured 2026-10-29, the Deferred share by window was:
+#
+#   1 day            55.6%
+#   3 days           40.2%
+#   30 days          40.5%
+#   30 days, floored 40.7%
+#
+# So the size of the correction depends entirely on the window. At 30 days the
+# floor moves deferral by 0.2 points and the no-CPE share by 2.4 - it is a
+# safeguard there, not a correction. At a week or less the bias is worth up to
+# 15 points, which is where the floor earns its place. Do not cite the 15-point
+# figure as the correction to a 30-day number: it is not.
+MIN_AGE_HOURS = 72

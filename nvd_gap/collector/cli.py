@@ -23,7 +23,7 @@ import duckdb
 import pyarrow.parquet as pq
 
 from . import __version__
-from .config import CHANGES_DIR, ROLLUP_PATH, SYNC_STATE_PATH
+from .config import CHANGES_DIR, MIN_AGE_HOURS, ROLLUP_PATH, SYNC_STATE_PATH
 from .normalize import normalize_cve
 from .sources import nvd
 from .storage import (
@@ -236,35 +236,82 @@ WITH base AS (
 cohorts AS (
     SELECT 'all' AS cohort, * FROM base
     UNION ALL
+    -- The two headline cohorts. A minimum age is applied because deferral is
+    -- recorded at intake and partly reclassified afterwards, so a window
+    -- holding very fresh records overstates it. See config.MIN_AGE_HOURS.
+    SELECT 'settled_30d' AS cohort, * FROM base
+      WHERE published_ts >= CAST(now() AS TIMESTAMP) - INTERVAL 30 DAY
+        AND published_ts <  CAST(now() AS TIMESTAMP) - INTERVAL {min_age} HOUR
+    UNION ALL
+    SELECT 'settled_90d' AS cohort, * FROM base
+      WHERE published_ts >= CAST(now() AS TIMESTAMP) - INTERVAL 90 DAY
+        AND published_ts <  CAST(now() AS TIMESTAMP) - INTERVAL {min_age} HOUR
+    UNION ALL
+    -- Deliberately kept and published: the excluded cohort is the evidence
+    -- that the exclusion is honest rather than convenient. Bounded above by
+    -- now, so a record carrying a future publication date cannot park here
+    -- permanently, invisible to every settled window.
+    SELECT 'fresh' AS cohort, * FROM base
+      WHERE published_ts >= CAST(now() AS TIMESTAMP) - INTERVAL {min_age} HOUR
+        AND published_ts <= CAST(now() AS TIMESTAMP)
+    UNION ALL
     SELECT 'published_30d' AS cohort, * FROM base
       WHERE published_ts >= CAST(now() AS TIMESTAMP) - INTERVAL 30 DAY
+        AND published_ts <= CAST(now() AS TIMESTAMP)
     UNION ALL
     SELECT 'published_90d' AS cohort, * FROM base
       WHERE published_ts >= CAST(now() AS TIMESTAMP) - INTERVAL 90 DAY
+        AND published_ts <= CAST(now() AS TIMESTAMP)
     UNION ALL
     SELECT 'post_policy' AS cohort, * FROM base
       WHERE published_ts >= TIMESTAMP '{policy} 00:00:00'
     UNION ALL
     SELECT 'pre_policy' AS cohort, * FROM base
       WHERE published_ts < TIMESTAMP '{policy} 00:00:00'
+),
+agg AS (
+    SELECT
+        cohort,
+        count(*)                                        AS records,
+        count_if(NOT has_cpe)                           AS no_cpe,
+        count_if(unscored)                              AS unscored,
+        count_if(nvd_scored)                            AS nvd_scored,
+        count_if(cna_scored AND NOT nvd_scored)         AS cna_only,
+        count_if(nvd_declined)                          AS nvd_declined,
+        count_if(in_queue)                              AS in_queue,
+        count_if(is_rejected)                           AS rejected
+    FROM cohorts
+    GROUP BY cohort
+),
+-- Every cohort is emitted even when it matches nothing. GROUP BY on its own
+-- drops an empty cohort entirely, so a stale baseline would silently remove
+-- the fresh row - the one the dashboard leans on to show what it excluded.
+names AS (
+    SELECT cohort FROM (VALUES
+        ('all'), ('settled_30d'), ('settled_90d'), ('fresh'),
+        ('published_30d'), ('published_90d'), ('post_policy'), ('pre_policy')
+    ) AS v(cohort)
 )
 SELECT
     CAST(? AS DATE)                                     AS run_date,
-    cohort,
-    count(*)                                            AS records,
-    count_if(NOT has_cpe)                               AS no_cpe,
-    count_if(unscored)                                  AS unscored,
-    count_if(nvd_scored)                                AS nvd_scored,
-    count_if(cna_scored AND NOT nvd_scored)             AS cna_only,
-    count_if(nvd_declined)                              AS nvd_declined,
-    count_if(in_queue)                                  AS in_queue,
-    count_if(is_rejected)                               AS rejected,
-    round(100.0 * count_if(NOT has_cpe) / count(*), 2)  AS pct_no_cpe,
-    round(100.0 * count_if(unscored) / count(*), 2)     AS pct_unscored,
-    round(100.0 * count_if(nvd_scored) / count(*), 2)   AS pct_nvd_scored
-FROM cohorts
-GROUP BY cohort
-ORDER BY cohort
+    names.cohort                                        AS cohort,
+    COALESCE(agg.records, 0)                            AS records,
+    COALESCE(agg.no_cpe, 0)                             AS no_cpe,
+    COALESCE(agg.unscored, 0)                           AS unscored,
+    COALESCE(agg.nvd_scored, 0)                         AS nvd_scored,
+    COALESCE(agg.cna_only, 0)                           AS cna_only,
+    COALESCE(agg.nvd_declined, 0)                       AS nvd_declined,
+    COALESCE(agg.in_queue, 0)                           AS in_queue,
+    COALESCE(agg.rejected, 0)                           AS rejected,
+    -- Shares stay NULL for an empty cohort rather than 0: a share of nothing
+    -- is not zero, and a zero here would read as "none of them", a claim the
+    -- data does not support.
+    round(100.0 * agg.no_cpe / agg.records, 2)          AS pct_no_cpe,
+    round(100.0 * agg.unscored / agg.records, 2)        AS pct_unscored,
+    round(100.0 * agg.nvd_scored / agg.records, 2)      AS pct_nvd_scored
+FROM names
+LEFT JOIN agg ON agg.cohort = names.cohort
+ORDER BY names.cohort
 """
 
 
@@ -275,7 +322,7 @@ def cmd_rollup(args: argparse.Namespace) -> int:
 
     ensure_dirs()
     run_date = date.today()
-    sql = _ROLLUP_SQL.format(policy=POLICY_DATE)
+    sql = _ROLLUP_SQL.format(policy=POLICY_DATE, min_age=MIN_AGE_HOURS)
 
     con = duckdb.connect()
     temp_path = ROLLUP_PATH.with_suffix(".parquet.tmp")
@@ -311,11 +358,22 @@ def cmd_rollup(args: argparse.Namespace) -> int:
         f"{'cohort':<16}{'records':>10}{'no CPE %':>11}"
         f"{'unscored %':>12}{'NVD scored %':>14}"
     )
+    def share(value) -> str:
+        """Render a share, or a dash where the cohort matched nothing.
+
+        An empty cohort carries NULL rather than 0, so printing it as a number
+        would both crash and, once formatted, claim a 0% that no data supports.
+        """
+        return "-" if value is None else f"{value:.2f}"
+
     print()
     print(header)
     print("-" * len(header))
     for cohort, records, no_cpe, unscored, nvd_scored in printable:
-        print(f"{cohort:<16}{records:>10,}{no_cpe:>11}{unscored:>12}{nvd_scored:>14}")
+        print(
+            f"{cohort:<16}{records:>10,}"
+            f"{share(no_cpe):>11}{share(unscored):>12}{share(nvd_scored):>14}"
+        )
     print()
     return 0
 
@@ -323,56 +381,118 @@ def cmd_rollup(args: argparse.Namespace) -> int:
 # ------------------------------------------------------------------- probe
 
 
+def _parse_iso(value: str, flag: str) -> datetime:
+    """Parse an ISO date or timestamp, naming the flag and value on failure."""
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        raise ValueError(
+            f"{flag} expects an ISO date such as 2024-01-01, not {value!r}"
+        ) from None
+
+
+# Reported apart, never summed: "declined" is a decision the NVD has made and
+# "in queue" is a backlog that may still clear. Collapsing them overstates the
+# permanent gap, badly so in a short window where most records are days old.
+_PROBE_MEASURES = (
+    ("no CPE match", lambda r: not r["has_cpe"]),
+    ("no score at all", lambda r: r["unscored"]),
+    ("NVD scored", lambda r: r["nvd_scored"]),
+    ("CNA scored only", lambda r: r["cna_scored"] and not r["nvd_scored"]),
+    ("NVD declined", lambda r: r["nvd_declined"]),
+    ("still in queue", lambda r: r["in_queue"]),
+    ("rejected", lambda r: r["is_rejected"]),
+)
+
+
 def cmd_probe(args: argparse.Namespace) -> int:
-    """Sample recent publications and report the gap, without touching state.
+    """Sample a publication window and report the gap, without touching state.
 
-    This is the sanity check behind every headline number the dashboard will
-    show. If the enrichment gap is not visible here, it is not real, and no
-    amount of presentation will make it so.
+    This is the sanity check behind every headline number the dashboard shows.
+    If the enrichment gap is not visible here, it is not real, and no amount of
+    presentation will make it so. Which is why --min-age-hours defaults to the
+    floor the dashboard publishes with: reproducing a published figure has to be
+    the zero-argument case, or the check disagrees with what it is checking.
+
+    Counts accumulate as the crawl runs rather than collecting into a list. An
+    explicit --published-from can reach the whole corpus - over 400,000 records
+    - and holding every one of them would cost gigabytes for an answer that is
+    only ever a handful of totals.
     """
-    end = datetime.now(timezone.utc)
-    start = end - timedelta(days=args.days)
-    observed_at = _now_iso()
+    now = datetime.now(timezone.utc)
+    try:
+        if args.published_from:
+            # An explicit range, for comparing a historical cohort against a
+            # figure someone else published about that same cohort.
+            start = _parse_iso(args.published_from, "--published-from")
+            end = (
+                _parse_iso(args.published_to, "--published-to")
+                if args.published_to
+                else now - timedelta(hours=args.min_age_hours)
+            )
+        else:
+            end = now - timedelta(hours=args.min_age_hours)
+            start = now - timedelta(days=args.days)
+    except ValueError as exc:
+        log.error("%s", exc)
+        return 1
 
-    rows: list[dict] = []
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone.utc)
+
+    if end <= start:
+        log.error(
+            "Empty window: %s to %s. With --min-age-hours %s, --days must "
+            "exceed %.1f.",
+            start.isoformat(),
+            end.isoformat(),
+            args.min_age_hours,
+            args.min_age_hours / 24,
+        )
+        return 1
+
+    observed_at = _now_iso()
+    counts: Counter = Counter()
+    statuses: Counter = Counter()
+    total = 0
+
     for cve in nvd.crawl_published(start, end):
-        rows.append(normalize_cve(cve, observed_at))
-        if args.limit and len(rows) >= args.limit:
+        row = normalize_cve(cve, observed_at)
+        total += 1
+        for label, predicate in _PROBE_MEASURES:
+            if predicate(row):
+                counts[label] += 1
+        statuses[row["vuln_status"]] += 1
+        if args.limit and total >= args.limit:
             log.info("Stopping early at --limit %s", f"{args.limit:,}")
             break
 
-    if not rows:
-        log.error("No records returned for the last %d days", args.days)
+    if total == 0:
+        log.error(
+            "No records published between %s and %s",
+            start.isoformat(),
+            end.isoformat(),
+        )
         return 1
 
-    total = len(rows)
-
-    def line(label: str, count: int) -> str:
-        return f"  {label:<22}{count:>8,}{100.0 * count / total:>9.1f}%"
-
+    # Resolved timestamps, not dates: a date alone reads as a whole inclusive
+    # day, and the end bound is an instant.
+    stamp = "%Y-%m-%d %H:%M UTC"
     print()
-    print(f"Sample: {total:,} CVEs published in the last {args.days} days")
-    print("-" * 41)
-    print(line("no CPE match", sum(1 for r in rows if not r["has_cpe"])))
-    print(line("no score at all", sum(1 for r in rows if r["unscored"])))
-    print(line("NVD scored", sum(1 for r in rows if r["nvd_scored"])))
     print(
-        line(
-            "CNA scored only",
-            sum(1 for r in rows if r["cna_scored"] and not r["nvd_scored"]),
-        )
+        f"Sample: {total:,} CVEs published "
+        f"{start.strftime(stamp)} to {end.strftime(stamp)}"
     )
-    # "declined" and "in queue" must be reported apart: the first is a
-    # decision NVD has made, the second is a backlog that may still clear.
-    # Collapsing them overstates the permanent gap, especially in a short
-    # window where most records are only days old.
-    print(line("NVD declined", sum(1 for r in rows if r["nvd_declined"])))
-    print(line("still in queue", sum(1 for r in rows if r["in_queue"])))
-    print(line("rejected", sum(1 for r in rows if r["is_rejected"])))
+    print("-" * 46)
+    for label, _ in _PROBE_MEASURES:
+        n = counts[label]
+        print(f"  {label:<22}{n:>8,}{100.0 * n / total:>9.1f}%")
     print()
     print("vulnStatus breakdown:")
-    for status, count in Counter(r["vuln_status"] for r in rows).most_common():
-        print(f"  {status or '(empty)':<22}{count:>8,}{100.0 * count / total:>9.1f}%")
+    for status, n in statuses.most_common():
+        print(f"  {(status or '(empty)'):<22}{n:>8,}{100.0 * n / total:>9.1f}%")
     print()
     return 0
 
@@ -438,6 +558,23 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_probe = sub.add_parser("probe", help="sample recent publications, no state write")
     p_probe.add_argument("--days", type=int, default=30, help="lookback window")
+    p_probe.add_argument(
+        "--min-age-hours",
+        type=int,
+        default=MIN_AGE_HOURS,
+        help=(
+            "exclude records younger than this; defaults to the floor the "
+            f"dashboard publishes with ({MIN_AGE_HOURS}), so reproducing a "
+            "published figure needs no flags. Pass 0 for the raw window, "
+            "which is biased toward Deferred."
+        ),
+    )
+    p_probe.add_argument(
+        "--published-from", help="ISO date; overrides --days for an explicit cohort"
+    )
+    p_probe.add_argument(
+        "--published-to", help="ISO date; defaults to now minus --min-age-hours"
+    )
     p_probe.add_argument("--limit", type=int, default=0, help="stop after N records")
     p_probe.set_defaults(func=cmd_probe)
 
