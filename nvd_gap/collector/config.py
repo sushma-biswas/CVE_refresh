@@ -19,7 +19,6 @@ STATE_DIR = DATA_DIR / "state"
 CHANGES_DIR = DATA_DIR / "changes"
 ROLLUP_DIR = DATA_DIR / "rollups"
 
-LAST_SEEN_PATH = STATE_DIR / "last_seen.parquet"
 SYNC_STATE_PATH = STATE_DIR / "sync_state.json"
 ROLLUP_PATH = ROLLUP_DIR / "coverage_daily.parquet"
 
@@ -54,6 +53,12 @@ NVD_SOURCE_ID = "nvd@nist.gov"
 # are merely recent, so collapsing the two inflates every headline number.
 # "Deferred" is the status the April 2026 triage policy pushes new records
 # into; "Not Scheduled" holds the pre-March-2026 backlog it abandoned.
+#
+# There is deliberately no combined "unenriched" constant. Reporting the two
+# as one number collapses a durable NVD decision (~40%, stable across
+# windows) into a clearing backlog (48.9% at 3 days, 37.2% at 30), producing a
+# headline figure that swings with the sampling window and is trivially
+# discredited. Any caller that wants the union must spell it out at the call
+# site and own that choice.
 TERMINAL_UNENRICHED_STATUSES = frozenset({"Not Scheduled", "Deferred"})
 QUEUED_STATUSES = frozenset({"Awaiting Analysis", "Received", "Undergoing Analysis"})
-UNENRICHED_STATUSES = TERMINAL_UNENRICHED_STATUSES | QUEUED_STATUSES

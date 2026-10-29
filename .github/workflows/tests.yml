@@ -1,0 +1,54 @@
+name: Tests
+
+# The collector workflow is a data job, not a build - it runs on a schedule and
+# must not be the thing that tells us the code is broken. This runs the tests
+# on every push and pull request instead.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nvd_gap/**"
+      - ".github/workflows/tests.yml"
+  pull_request:
+    paths:
+      - "nvd_gap/**"
+      - ".github/workflows/tests.yml"
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            nvd_gap/requirements.txt
+            nvd_gap/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          pip install -r nvd_gap/requirements.txt
+          pip install -r nvd_gap/requirements-dev.txt
+
+      # No network: every test here is offline by construction, so a flaky
+      # NVD API can never turn into a red build.
+      - name: Run tests
+        working-directory: nvd_gap
+        run: python -m pytest tests/ -q
+
+      - name: Validate collector workflow YAML
+        run: |
+          python -c "
+          import yaml, sys
+          for path in ('.github/workflows/nvd-gap-collector.yml',
+                       '.github/workflows/tests.yml'):
+              with open(path, encoding='utf-8') as handle:
+                  yaml.safe_load(handle)
+              print('ok', path)
+          "

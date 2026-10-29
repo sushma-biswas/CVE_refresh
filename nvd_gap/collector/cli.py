@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import sys
 import uuid
 from collections import Counter
@@ -134,9 +135,10 @@ def cmd_baseline(args: argparse.Namespace) -> int:
         con.close()
     temp_path.replace(CURRENT_PATH)
 
-    for part in parts_dir.glob("*.parquet"):
-        part.unlink()
-    parts_dir.rmdir()
+    # Best-effort. State is already committed above, so a leftover file in
+    # here must never turn a successful baseline into a failed job - in CI
+    # that would discard the cache and force the whole crawl again.
+    shutil.rmtree(parts_dir, ignore_errors=True)
 
     _write_sync_state({"last_sync_utc": observed_at, "baseline_records": total})
     log.info("Baseline complete: %s records fetched", f"{total:,}")

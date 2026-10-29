@@ -16,7 +16,7 @@ from .config import (
     TERMINAL_UNENRICHED_STATUSES,
 )
 
-# Ordered by preference: we report the strongest CVSS version present.
+# Ordered strongest-first: we report the highest CVSS version present.
 METRIC_KEYS = ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2")
 
 _CVSS_VERSION_LABEL = {
@@ -44,6 +44,34 @@ def _iter_metrics(cve: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield key, entry
 
 
+def _metric_rank(item: tuple[str, dict[str, Any]]) -> tuple[int, int, int, str]:
+    """Total ordering over CVSS entries, best first.
+
+    A CVE is routinely scored by both its CNA and NVD at the same CVSS
+    version, so both entries sit in the same metric list. NVD does not
+    contract the order of that list, which means picking "the first one" makes
+    base_score depend on serialisation order and lets the same record
+    normalise differently on separate observations. Since content_hash is
+    computed over the raw record, such a flip would not even register as a
+    change - current.parquet would just quietly disagree with itself.
+
+    So the choice is made explicit and total: strongest CVSS version, then
+    NVD's own Primary score, then any Primary, then NVD as a source, and
+    finally the source identifier as an alphabetical tie-break so that no two
+    distinct entries can ever compare equal.
+    """
+    key, entry = item
+    is_primary = (entry.get("type") or "") == "Primary"
+    source = entry.get("source") or ""
+    is_nvd = source == NVD_SOURCE_ID
+    return (
+        METRIC_KEYS.index(key),
+        0 if (is_primary and is_nvd) else 1 if is_primary else 2,
+        0 if is_nvd else 1,
+        source,
+    )
+
+
 def _cpe_count(cve: dict[str, Any]) -> int:
     """Count cpeMatch entries across all configuration nodes.
 
@@ -66,23 +94,20 @@ def _english_description(cve: dict[str, Any]) -> str:
 
 def normalize_cve(cve: dict[str, Any], observed_at: str) -> dict[str, Any]:
     """Return one flat observation row for a single CVE record."""
-    nvd_scored = False
-    cna_scored = False
-    best_key: str | None = None
-    best_entry: dict[str, Any] | None = None
+    candidates = list(_iter_metrics(cve))
 
-    for key, entry in _iter_metrics(cve):
-        source = entry.get("source") or ""
-        if source == NVD_SOURCE_ID:
-            nvd_scored = True
-        else:
-            cna_scored = True
-        # METRIC_KEYS is ordered strongest-first, so the first key we see for
-        # which we have no candidate yet is the strongest available version.
-        if best_key is None or METRIC_KEYS.index(key) < METRIC_KEYS.index(best_key):
-            best_key, best_entry = key, entry
+    nvd_scored = any(
+        (entry.get("source") or "") == NVD_SOURCE_ID for _, entry in candidates
+    )
+    cna_scored = any(
+        (entry.get("source") or "") != NVD_SOURCE_ID for _, entry in candidates
+    )
 
+    best_key, best_entry = (
+        min(candidates, key=_metric_rank) if candidates else (None, None)
+    )
     cvss_data = (best_entry or {}).get("cvssData") or {}
+
     cpe_count = _cpe_count(cve)
     vuln_status = cve.get("vulnStatus") or ""
     description = _english_description(cve)
@@ -93,7 +118,9 @@ def normalize_cve(cve: dict[str, Any], observed_at: str) -> dict[str, Any]:
         "published": cve.get("published") or None,
         "last_modified": cve.get("lastModified") or None,
         "vuln_status": vuln_status,
-        # Derived gap flags - the metrics Route 1 reports on.
+        # Derived gap flags - the metrics Route 1 reports on. Kept distinct
+        # from the verbatim API fields above, because NVD's terms forbid
+        # attributing modified content to them.
         "nvd_scored": nvd_scored,
         "cna_scored": cna_scored,
         "unscored": not (nvd_scored or cna_scored),
@@ -102,7 +129,7 @@ def normalize_cve(cve: dict[str, Any], observed_at: str) -> dict[str, Any]:
         "nvd_declined": vuln_status in TERMINAL_UNENRICHED_STATUSES,
         "in_queue": vuln_status in QUEUED_STATUSES,
         "is_rejected": vuln_status == "Rejected",
-        # Strongest CVSS present, whoever supplied it.
+        # Strongest CVSS present, chosen deterministically - see _metric_rank.
         "cvss_version": _CVSS_VERSION_LABEL.get(best_key or "", None),
         "cvss_source": (best_entry or {}).get("source") or None,
         "base_score": cvss_data.get("baseScore"),

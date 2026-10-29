@@ -69,11 +69,13 @@ jobs:
             exit 1
           fi
 
-      # Restore the rebuildable current-state snapshot. The key rotates daily
-      # so each run writes a fresh entry; restore-keys falls back to the most
-      # recent previous one.
+      # Restore and save are split on purpose. The combined actions/cache only
+      # writes the cache from a post step gated on whole-job success, so a
+      # failure in any later step would silently discard a baseline that had
+      # taken hours - and the next scheduled run would then find no state and
+      # fail too, nightly, until someone noticed.
       - name: Restore collector state
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: nvd_gap/data/state
           key: nvd-gap-state-${{ github.run_id }}
@@ -89,6 +91,17 @@ jobs:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
         working-directory: nvd_gap
         run: python -m collector baseline --force
+
+      # Cache the baseline the moment it succeeds: it is by far the most
+      # expensive thing this workflow does, and it must survive anything that
+      # goes wrong afterwards.
+      - name: Save baseline state
+        if: inputs.run_baseline
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: nvd_gap/data/state
+          key: nvd-gap-state-${{ github.run_id }}-baseline
 
       - name: Require existing state
         if: ${{ !inputs.run_baseline }}
@@ -115,6 +128,17 @@ jobs:
         working-directory: nvd_gap
         run: python -m collector status
 
+      # Before the commit, which is the step most likely to fail. upsert_current
+      # writes via a temp file and renames, so whatever is on disk here is a
+      # consistent snapshot - either the old one or the new one.
+      - name: Save collector state
+        if: always()
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: nvd_gap/data/state
+          key: nvd-gap-state-${{ github.run_id }}
+
       - name: Commit change log and rollups
         run: |
           git config user.name  "nvd-gap-collector[bot]"
@@ -122,7 +146,21 @@ jobs:
           git add nvd_gap/data/changes nvd_gap/data/rollups 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "No new changes to commit."
-          else
-            git commit -m "data: collector run $(date -u +%Y-%m-%dT%H:%MZ)"
-            git push
+            exit 0
           fi
+          git commit -m "data: collector run $(date -u +%Y-%m-%dT%H:%MZ)"
+          # The branch can move while a long run is in flight, which would make
+          # this push non-fast-forward and throw away correct collected data.
+          # The collector only ever appends new files, so a rebase cannot
+          # conflict semantically - retry rather than fail.
+          branch="${GITHUB_REF_NAME}"
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:${branch}"; then
+              echo "Pushed on attempt ${attempt}."
+              exit 0
+            fi
+            echo "Push rejected - rebasing onto origin/${branch} and retrying."
+            git pull --rebase --autostash origin "${branch}" || exit 1
+          done
+          echo "::error::Could not push after 3 attempts."
+          exit 1

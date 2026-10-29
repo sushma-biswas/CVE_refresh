@@ -21,7 +21,13 @@ enrichment actually exists, and from whom?* This collector measures it.
 
 ## Commands
 
+Run these from the `nvd_gap/` directory — the `collector` package lives there,
+so `python -m collector` from the repository root fails with
+`No module named collector`.
+
 ```bash
+cd nvd_gap
+
 python -m collector probe --days 30   # sample recent publications, no state write
 python -m collector baseline          # one-time full corpus crawl
 python -m collector sync              # fetch lastModified changes, append change log
