@@ -1,0 +1,9 @@
+# Local state is tens of megabytes, changes every day, and is fully
+# rebuildable from a crawl - never commit it.
+data/state/
+data/**/*.tmp
+
+# The change log (data/changes/) and rollups (data/rollups/) are deliberately
+# NOT ignored. They are small, append-only, and cannot be rebuilt from any
+# upstream source, and committing them gives the measurements a tamper-evident
+# public history. See README.md.

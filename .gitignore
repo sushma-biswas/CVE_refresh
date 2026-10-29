@@ -24,3 +24,9 @@ Thumbs.db
 .idea/
 .vscode/
 .claude/
+
+# Python virtualenvs
+venv/
+.venv/
+__pycache__/
+*.pyc
