@@ -10,10 +10,16 @@ on:
     paths:
       - "nvd_gap/**"
       - ".github/workflows/tests.yml"
+      # The validation step below exists to check the collector workflow's
+      # YAML, so a change to that file has to trigger this run. Leaving it out
+      # means the guard exists but is wired to the wrong event, and a broken
+      # collector workflow reaches main with no check having run.
+      - ".github/workflows/nvd-gap-collector.yml"
   pull_request:
     paths:
       - "nvd_gap/**"
       - ".github/workflows/tests.yml"
+      - ".github/workflows/nvd-gap-collector.yml"
 
 jobs:
   pytest:
