@@ -34,6 +34,9 @@ concurrency:
 
 permissions:
   contents: write
+  # For the failure report below: this job has no pull request, so it files an
+  # issue against itself rather than failing unnoticed.
+  issues: write
 
 jobs:
   collect:
@@ -164,3 +167,43 @@ jobs:
           done
           echo "::error::Could not push after 3 attempts."
           exit 1
+
+      # Nothing else watches this job. It runs on a schedule, on the default
+      # branch, with no pull request for the desktop app's CI monitor to
+      # attach to, so it has to report its own failures. One open issue is
+      # reused and later failures become comments on it: a fresh issue every
+      # night would bury the first and most informative one under duplicates.
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # Idempotent: --force updates a label that already exists, and
+          # `gh issue create` fails outright on a label that does not.
+          gh label create collector-failure \
+            --color B60205 \
+            --description "An unattended collector run failed" \
+            --force
+
+          note="Run ${GITHUB_RUN_ID} (${GITHUB_EVENT_NAME}) failed: ${RUN_URL}"
+          existing="$(gh issue list --label collector-failure --state open \
+            --limit 1 --json number --jq '.[0].number // empty')"
+
+          if [ -n "${existing}" ]; then
+            gh issue comment "${existing}" --body "${note}"
+            echo "Added a comment to issue #${existing}."
+          else
+            body="$(printf '%s\n\n%s\n\n%s\n\n%s\n' \
+              "${note}" \
+              "While this issue stays open, later failures are added here as comments rather than opening new ones. Close it once the collector is healthy again." \
+              "- If runs have been failing for more than about a week, the Actions cache holding state/current.parquet has most likely been evicted. Recovery then needs a manual run with run_baseline=true, which re-crawls the whole corpus." \
+              "- GitHub disables scheduled workflows after 60 days without repository activity, and this job's own data commits are what normally supply that activity. A long failure streak can therefore switch the schedule off silently, so check the workflow is still enabled.")"
+            gh issue create \
+              --title "Collector run failed" \
+              --label collector-failure \
+              --body "${body}"
+            echo "Opened a new issue."
+          fi
